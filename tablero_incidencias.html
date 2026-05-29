@@ -56,72 +56,6 @@ tr:hover td{background:#fafafa}
   .charts-grid{grid-template-columns:1fr}
   .chart-card.full{grid-column:1}
 }
-
-/* Estilos premium para cargador y notificaciones */
-.premium-overlay {
-  position: fixed;
-  top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(26, 58, 92, 0.85);
-  backdrop-filter: blur(4px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  color: #fff;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s ease;
-}
-.premium-overlay.active {
-  opacity: 1;
-  pointer-events: auto;
-}
-.premium-spinner {
-  width: 50px;
-  height: 50px;
-  border: 5px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 20px;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.premium-overlay p {
-  font-size: 16px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-  text-align: center;
-  max-width: 80%;
-}
-.premium-toast {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  background: #2e7d32;
-  color: #fff;
-  padding: 12px 24px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 10000;
-  transform: translateY(100px);
-  opacity: 0;
-  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
-}
-.premium-toast.active {
-  transform: translateY(0);
-  opacity: 1;
-}
-.premium-toast.error {
-  background: #c62828;
-}
 </style>
 </head>
 <body>
@@ -324,70 +258,52 @@ function update(){
   }).join('');
 }
 
-// Helper para mostrar notificaciones toast premium
-function showToast(message, isError = false) {
-  const toast = document.getElementById('premiumToast');
-  const icon = document.getElementById('premiumToastIcon');
-  const text = document.getElementById('premiumToastText');
-  
-  if (isError) {
-    toast.classList.add('error');
-    icon.textContent = '✕';
-  } else {
-    toast.classList.remove('error');
-    icon.textContent = '✓';
-  }
-  
-  text.textContent = message;
-  toast.classList.add('active');
-  
-  setTimeout(() => {
-    toast.classList.remove('active');
-  }, 4000);
-}
-
 // Carga de archivo xlsx
 document.getElementById('fileInput').addEventListener('change', async function(e){
   const file = e.target.files[0];
   if(!file) return;
+  const {read, utils} = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+  const buf = await file.arrayBuffer();
+  const wb = read(buf);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = utils.sheet_to_json(ws, {header:1});
   
-  const loader = document.getElementById('premiumLoader');
-  const loaderText = document.getElementById('premiumLoaderText');
+  const headers = rows[0].map(h=>String(h).trim());
+  const idxNro = headers.findIndex(h=>h.includes('NRO'));
+  const idxNom = headers.findIndex(h=>h.includes('NOMBRE'));
+  const idxNiv = headers.findIndex(h=>h.includes('NIVEL'));
+  const idxTip = headers.findIndex(h=>h.includes('TIPO') && !h.includes('SUB'));
+  const idxSub = headers.findIndex(h=>h.includes('SUBTIPO'));
+  const idxEst = headers.findIndex(h=>h.includes('ESTADO'));
+  const idxFec = headers.findIndex(h=>h.includes('FECHA INCIDENCIA'));
+  const idxMon = headers.findIndex(h=>h.includes('MONTO RENDIDO'));
   
-  // Mostrar overlay con animación
-  loaderText.textContent = "Subiendo y consolidando incidencias... Por favor, espere.";
-  loader.classList.add('active');
-  
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  try {
-    const response = await fetch('/upload', {
-      method: 'POST',
-      body: formData
-    });
-    
-    const result = await response.json();
-    
-    if (response.ok && result.success) {
-      // Éxito: notificar y recargar la página para ver el HTML consolidado
-      loaderText.textContent = "¡Datos consolidados con éxito! Recargando tablero...";
-      showToast(`✓ ¡Datos actualizados! Se consolidaron ${result.count} incidencias.`, false);
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    } else {
-      // Error de servidor
-      loader.classList.remove('active');
-      showToast(result.error || "Ocurrió un error al procesar el archivo.", true);
-      e.target.value = '';
+  const nuevos = [];
+  rows.slice(1).forEach(row=>{
+    if(!row[idxNro]) return;
+    const montoStr = String(row[idxMon]||'0').replace(/[\$\.]/g,'').replace(',','.');
+    const monto = parseFloat(montoStr)||0;
+    let fecha='', mes='';
+    if(row[idxFec]){
+      const d = new Date(Math.round((row[idxFec]-25569)*86400*1000));
+      if(!isNaN(d)){fecha=d.toISOString().slice(0,10);mes=fecha.slice(0,7);}
     }
-  } catch (error) {
-    // Error de red/petición
-    loader.classList.remove('active');
-    showToast("Error de conexión con el servidor. Verifique si el backend está activo.", true);
-    e.target.value = '';
-  }
+    nuevos.push({
+      nro: String(row[idxNro]),
+      nombre: String(row[idxNom]||'').trim(),
+      nivel: String(row[idxNiv]||'-').trim(),
+      tipo: String(row[idxTip]||'OTROS').trim(),
+      subtipo: String(row[idxSub]||'').trim(),
+      estado: String(row[idxEst]||'').trim(),
+      fecha, mes, monto
+    });
+  });
+  
+  if(nuevos.length===0){alert('No se encontraron incidencias en el archivo.');return;}
+  RAW = nuevos;
+  poblarFiltros(RAW);
+  update();
+  alert(`✓ Datos actualizados: ${nuevos.length} incidencias cargadas.`);
 });
 
 ['fPeriodo','fNivel','fTipo','fEstado'].forEach(id=>document.getElementById(id).addEventListener('change',update));
@@ -396,15 +312,5 @@ document.getElementById('fEscuela').addEventListener('input', update);
 poblarFiltros(RAW);
 update();
 </script>
-
-<!-- Elementos premium para overlay y notificaciones toast -->
-<div id="premiumLoader" class="premium-overlay">
-  <div class="premium-spinner"></div>
-  <p id="premiumLoaderText">Subiendo y procesando archivo... Por favor, espere.</p>
-</div>
-<div id="premiumToast" class="premium-toast">
-  <span id="premiumToastIcon">✓</span>
-  <span id="premiumToastText">¡Operación exitosa!</span>
-</div>
 </body>
 </html>

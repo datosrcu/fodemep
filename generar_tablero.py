@@ -356,7 +356,7 @@ update();
     
     with open(ruta_salida, 'w', encoding='utf-8') as f:
         f.write(html)
-    print(f"✓ Tablero generado: {ruta_salida} ({len(records)} incidencias)")
+    print(f"[OK] Tablero generado: {ruta_salida} ({len(records)} incidencias)")
 
 def procesar_directorio(ruta_dir, ruta_html_actual='tablero_incidencias.html'):
     all_records = {}
@@ -372,7 +372,7 @@ def procesar_directorio(ruta_dir, ruta_html_actual='tablero_incidencias.html'):
                 historicos = json.loads(match.group(1))
                 for r in historicos:
                     all_records[r['nro']] = r
-                print(f"✓ Cargados {len(historicos)} registros históricos desde {ruta_html_actual}")
+                print(f"[OK] Cargados {len(historicos)} registros históricos desde {ruta_html_actual}")
         except Exception as e:
             print(f"Advertencia al leer registros históricos del HTML: {e}")
             
