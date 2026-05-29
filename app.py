@@ -5,7 +5,7 @@ import generar_tablero
 
 app = Flask(__name__, static_folder='.')
 
-UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads')
+UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', '/app/uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @app.route('/')
