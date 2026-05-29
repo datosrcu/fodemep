@@ -358,24 +358,37 @@ update();
         f.write(html)
     print(f"✓ Tablero generado: {ruta_salida} ({len(records)} incidencias)")
 
-def procesar_directorio(ruta_dir):
+def procesar_directorio(ruta_dir, ruta_html_actual='tablero_incidencias.html'):
     all_records = {}
-    if not os.path.exists(ruta_dir) or not os.path.isdir(ruta_dir):
-        return []
     
-    # Ordenar alfabéticamente para asegurar un procesamiento predecible
-    archivos = sorted([f for f in os.listdir(ruta_dir) if f.endswith(('.xlsx', '.xls'))])
-    
-    for archivo in archivos:
-        ruta_archivo = os.path.join(ruta_dir, archivo)
-        print(f"Consolidando: {ruta_archivo}")
+    # 1. Cargar registros históricos ya presentes en el HTML para no perderlos
+    if os.path.exists(ruta_html_actual):
         try:
-            records = procesar_xlsx(ruta_archivo)
-            for r in records:
-                # El nro de incidencia es único. Mapeamos por clave para insertar/actualizar
-                all_records[r['nro']] = r
+            with open(ruta_html_actual, 'r', encoding='utf-8') as f:
+                content = f.read()
+            import re
+            match = re.search(r'let\s+RAW\s*=\s*(\[.*?\])\s*;', content, re.DOTALL)
+            if match:
+                historicos = json.loads(match.group(1))
+                for r in historicos:
+                    all_records[r['nro']] = r
+                print(f"✓ Cargados {len(historicos)} registros históricos desde {ruta_html_actual}")
         except Exception as e:
-            print(f"Error procesando {archivo}: {e}")
+            print(f"Advertencia al leer registros históricos del HTML: {e}")
+            
+    # 2. Consolidar con todos los archivos del directorio de uploads
+    if os.path.exists(ruta_dir) and os.path.isdir(ruta_dir):
+        archivos = sorted([f for f in os.listdir(ruta_dir) if f.endswith(('.xlsx', '.xls'))])
+        for archivo in archivos:
+            ruta_archivo = os.path.join(ruta_dir, archivo)
+            print(f"Consolidando: {ruta_archivo}")
+            try:
+                records = procesar_xlsx(ruta_archivo)
+                for r in records:
+                    # El nro de incidencia sirve de clave única para insertar/actualizar
+                    all_records[r['nro']] = r
+            except Exception as e:
+                print(f"Error procesando {archivo}: {e}")
             
     return list(all_records.values())
 
@@ -386,7 +399,7 @@ if __name__ == '__main__':
     if entrada and os.path.exists(entrada):
         if os.path.isdir(entrada):
             print(f"Procesando directorio: {entrada}")
-            records = procesar_directorio(entrada)
+            records = procesar_directorio(entrada, salida)
         else:
             print(f"Procesando archivo único: {entrada}")
             records = procesar_xlsx(entrada)
