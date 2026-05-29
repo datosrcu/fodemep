@@ -18,10 +18,10 @@ COPY . .
 RUN mkdir -p uploads
 
 # Exponer el puerto
-EXPOSE 5000
+EXPOSE 3000
 
 # Variables de entorno por defecto
-ENV PORT=5000
+ENV PORT=3000
 ENV UPLOAD_FOLDER=/app/uploads
 
 # Arrancar el servidor Flask
