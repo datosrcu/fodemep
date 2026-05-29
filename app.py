@@ -10,9 +10,17 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @app.route('/')
 def index():
-    # Servir el dashboard generado tablero_incidencias.html
-    response = send_from_directory('.', 'tablero_incidencias.html')
-    # Evitar por completo que el navegador o proxies intermedios almacenen en caché la página
+    # Estrategia ultra-robusta de persistencia: 
+    # Intentar servir el HTML consolidado desde el volumen persistente (UPLOAD_FOLDER)
+    persist_html = os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html')
+    if os.path.exists(persist_html):
+        print("Sirviendo tablero consolidado desde volumen persistente.")
+        response = send_from_directory(UPLOAD_FOLDER, 'tablero_incidencias.html')
+    else:
+        print("Sirviendo tablero base (sin cargas previas).")
+        response = send_from_directory('.', 'tablero_incidencias.html')
+    
+    # Deshabilitar por completo el caché del navegador y proxies intermedios
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '-1'
@@ -37,13 +45,14 @@ def upload_file():
         safe_filename = f"{timestamp}_{file.filename}"
         filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
         file.save(filepath)
-        print(f"Archivo guardado: {filepath}")
+        print(f"Archivo guardado en volumen: {filepath}")
         
         # Procesar todos los archivos en la carpeta de uploads para consolidarlos
-        records = generar_tablero.procesar_directorio(UPLOAD_FOLDER)
+        records = generar_tablero.procesar_directorio(UPLOAD_FOLDER, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
         
-        # Regenerar tablero_incidencias.html
+        # Guardar el HTML regenerado tanto en la raíz como en la carpeta persistente
         generar_tablero.generar_html(records, 'tablero_incidencias.html')
+        generar_tablero.generar_html(records, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
         
         return jsonify({
             'success': True,
@@ -61,8 +70,9 @@ if __name__ != '__main__':
     try:
         if os.path.exists(UPLOAD_FOLDER) and os.listdir(UPLOAD_FOLDER):
             print("Iniciando consolidación de archivos existentes en volumen...")
-            records = generar_tablero.procesar_directorio(UPLOAD_FOLDER)
+            records = generar_tablero.procesar_directorio(UPLOAD_FOLDER, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
             generar_tablero.generar_html(records, 'tablero_incidencias.html')
+            generar_tablero.generar_html(records, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
     except Exception as err:
         print(f"Error en consolidación inicial: {err}")
 
@@ -71,8 +81,9 @@ if __name__ == '__main__':
     try:
         if os.path.exists(UPLOAD_FOLDER) and os.listdir(UPLOAD_FOLDER):
             print("Iniciando consolidación de archivos existentes...")
-            records = generar_tablero.procesar_directorio(UPLOAD_FOLDER)
+            records = generar_tablero.procesar_directorio(UPLOAD_FOLDER, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
             generar_tablero.generar_html(records, 'tablero_incidencias.html')
+            generar_tablero.generar_html(records, os.path.join(UPLOAD_FOLDER, 'tablero_incidencias.html'))
     except Exception as err:
         print(f"Error en consolidación inicial: {err}")
         
