@@ -95,6 +95,112 @@ tr:hover td{{background:#fafafa}}
   .charts-grid{{grid-template-columns:1fr}}
   .chart-card.full{{grid-column:1}}
 }}
+
+/* Glassmorphism Loader Modal */
+.loader-overlay {{
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(10, 25, 47, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}}
+.loader-overlay.active {{
+  opacity: 1;
+  pointer-events: all;
+}}
+.loader-card {{
+  background: rgba(255, 255, 255, 0.85);
+  padding: 30px 40px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+  max-width: 350px;
+  transform: scale(0.9);
+  transition: transform 0.3s ease;
+}}
+.loader-overlay.active .loader-card {{
+  transform: scale(1);
+}}
+.spinner {{
+  width: 50px;
+  height: 50px;
+  border: 5px solid rgba(26, 115, 232, 0.1);
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: spin 1s infinite linear;
+}}
+@keyframes spin {{
+  0% {{ transform: rotate(0deg); }}
+  100% {{ transform: rotate(360deg); }}
+}}
+.loader-title {{
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a3a5c;
+}}
+.loader-desc {{
+  font-size: 12px;
+  color: #666;
+}}
+
+/* Stunning Floating Toast */
+.toast-container {{
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}}
+.toast {{
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 14px 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transform: translateY(20px);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-left: 5px solid #1a73e8;
+}}
+.toast.active {{
+  transform: translateY(0);
+  opacity: 1;
+}}
+.toast.success {{
+  border-left-color: #2e7d32;
+  color: #1b5e20;
+  background: rgba(232, 245, 233, 0.95);
+}}
+.toast.error {{
+  border-left-color: #c62828;
+  color: #b71c1c;
+  background: rgba(255, 235, 235, 0.95);
+}}
 </style>
 </head>
 <body>
@@ -297,52 +403,72 @@ function update(){{
   }}).join('');
 }}
 
-// Carga de archivo xlsx
+// Helper elements handling (Loader and Toasts)
+function showLoader() {{
+  document.getElementById('loaderOverlay').classList.add('active');
+}}
+function hideLoader() {{
+  document.getElementById('loaderOverlay').classList.remove('active');
+}}
+function showToast(message, type = 'success') {{
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${{type}}`;
+  toast.innerHTML = `<span>${{message}}</span>`;
+  container.appendChild(toast);
+  
+  setTimeout(() => {{
+    toast.classList.add('active');
+  }}, 10);
+  
+  setTimeout(() => {{
+    toast.classList.remove('active');
+    setTimeout(() => {{
+      toast.remove();
+    }}, 300);
+  }}, 4000);
+}}
+
+// Carga de archivo xlsx y envío al servidor para consolidación
 document.getElementById('fileInput').addEventListener('change', async function(e){{
   const file = e.target.files[0];
   if(!file) return;
-  const {{read, utils}} = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
-  const buf = await file.arrayBuffer();
-  const wb = read(buf);
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = utils.sheet_to_json(ws, {{header:1}});
   
-  const headers = rows[0].map(h=>String(h).trim());
-  const idxNro = headers.findIndex(h=>h.includes('NRO'));
-  const idxNom = headers.findIndex(h=>h.includes('NOMBRE'));
-  const idxNiv = headers.findIndex(h=>h.includes('NIVEL'));
-  const idxTip = headers.findIndex(h=>h.includes('TIPO') && !h.includes('SUB'));
-  const idxSub = headers.findIndex(h=>h.includes('SUBTIPO'));
-  const idxEst = headers.findIndex(h=>h.includes('ESTADO'));
-  const idxFec = headers.findIndex(h=>h.includes('FECHA INCIDENCIA'));
-  const idxMon = headers.findIndex(h=>h.includes('MONTO RENDIDO'));
+  // Validar extensión
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'xlsx' && ext !== 'xls') {{
+    showToast('Formato de archivo no permitido. Debe ser .xlsx o .xls.', 'error');
+    e.target.value = '';
+    return;
+  }}
   
-  const nuevos = [];
-  rows.slice(1).forEach(row=>{{
-    if(!row[idxNro]) return;
-    const montoStr = String(row[idxMon]||'0').replace(/[\$\.]/g,'').replace(',','.');
-    const monto = parseFloat(montoStr)||0;
-    let fecha='', mes='';
-    if(row[idxFec]){{
-      const d = new Date(Math.round((row[idxFec]-25569)*86400*1000));
-      if(!isNaN(d)){{fecha=d.toISOString().slice(0,10);mes=fecha.slice(0,7);}}
-    }}
-    nuevos.push({{
-      nro: String(row[idxNro]),
-      nombre: String(row[idxNom]||'').trim(),
-      nivel: String(row[idxNiv]||'-').trim(),
-      tipo: String(row[idxTip]||'OTROS').trim(),
-      subtipo: String(row[idxSub]||'').trim(),
-      estado: String(row[idxEst]||'').trim(),
-      fecha, mes, monto
+  showLoader();
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {{
+    const res = await fetch('/upload', {{
+      method: 'POST',
+      body: formData
     }});
-  }});
-  
-  if(nuevos.length===0){{alert('No se encontraron incidencias en el archivo.');return;}}
-  RAW = nuevos;
-  poblarFiltros(RAW);
-  update();
-  alert(`✓ Datos actualizados: ${{nuevos.length}} incidencias cargadas.`);
+    
+    const data = await res.json();
+    if (res.ok && data.success) {{
+      showToast(`¡Datos actualizados con éxito! ${{data.count}} incidencias consolidadas. Recargando...`, 'success');
+      setTimeout(() => {{
+        window.location.reload();
+      }}, 1500);
+    }} else {{
+      hideLoader();
+      showToast(data.error || 'Ocurrió un error al subir el archivo.', 'error');
+      e.target.value = '';
+    }}
+  }} catch (err) {{
+    hideLoader();
+    showToast('Error de red al intentar conectar con el servidor.', 'error');
+    e.target.value = '';
+  }}
 }});
 
 ['fPeriodo','fNivel','fTipo','fEstado'].forEach(id=>document.getElementById(id).addEventListener('change',update));
@@ -351,6 +477,19 @@ document.getElementById('fEscuela').addEventListener('input', update);
 poblarFiltros(RAW);
 update();
 </script>
+
+<!-- Loader Overlay -->
+<div id="loaderOverlay" class="loader-overlay">
+  <div class="loader-card">
+    <div class="spinner"></div>
+    <div class="loader-title">Procesando Datos</div>
+    <div class="loader-desc">Subiendo archivo Excel, consolidando incidencias y eliminando duplicados...</div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="toast-container"></div>
+
 </body>
 </html>"""
     
@@ -362,9 +501,14 @@ def procesar_directorio(ruta_dir, ruta_html_actual='tablero_incidencias.html'):
     all_records = {}
     
     # 1. Cargar registros históricos ya presentes en el HTML para no perderlos
-    if os.path.exists(ruta_html_actual):
+    target_html = ruta_html_actual
+    if not os.path.exists(target_html) and os.path.exists('tablero_incidencias.html'):
+        target_html = 'tablero_incidencias.html'
+        print(f"[OK] Ruta de volumen '{ruta_html_actual}' no encontrada. Cargando historial desde fallback raíz: '{target_html}'")
+        
+    if os.path.exists(target_html):
         try:
-            with open(ruta_html_actual, 'r', encoding='utf-8') as f:
+            with open(target_html, 'r', encoding='utf-8') as f:
                 content = f.read()
             import re
             match = re.search(r'let\s+RAW\s*=\s*(\[.*?\])\s*;', content, re.DOTALL)
@@ -372,7 +516,7 @@ def procesar_directorio(ruta_dir, ruta_html_actual='tablero_incidencias.html'):
                 historicos = json.loads(match.group(1))
                 for r in historicos:
                     all_records[r['nro']] = r
-                print(f"[OK] Cargados {len(historicos)} registros históricos desde {ruta_html_actual}")
+                print(f"[OK] Cargados {len(historicos)} registros históricos desde {target_html}")
         except Exception as e:
             print(f"Advertencia al leer registros históricos del HTML: {e}")
             
