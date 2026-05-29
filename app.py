@@ -11,7 +11,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 @app.route('/')
 def index():
     # Servir el dashboard generado tablero_incidencias.html
-    return send_from_directory('.', 'tablero_incidencias.html')
+    response = send_from_directory('.', 'tablero_incidencias.html')
+    # Evitar por completo que el navegador o proxies intermedios almacenen en caché la página
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '-1'
+    return response
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
