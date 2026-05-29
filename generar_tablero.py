@@ -1,0 +1,397 @@
+import pandas as pd
+import numpy as np
+import json
+import sys
+import os
+
+def limpiar_monto(val):
+    s = str(val).replace('$','').replace('.','').replace(',','.').strip()
+    try:
+        return float(s)
+    except:
+        return 0.0
+
+def procesar_xlsx(ruta_xlsx):
+    df = pd.read_excel(ruta_xlsx, header=0)
+    df.columns = [str(c).strip() for c in df.columns]
+    
+    inc = df[df['NRO. INCIDENCIA'].notna()].copy()
+    inc['monto']  = inc['MONTO RENDIDO INCIDENCIA'].apply(limpiar_monto)
+    inc['fecha_p'] = pd.to_datetime(inc['FECHA INCIDENCIA'], dayfirst=True, errors='coerce')
+    
+    out = []
+    for _, r in inc.iterrows():
+        out.append({
+            'nro':     str(r['NRO. INCIDENCIA']),
+            'nombre':  str(r.get('NOMBRE ESTABLECIMIENTO','')).strip(),
+            'nivel':   str(r.get('NIVEL','-')).strip(),
+            'tipo':    str(r.get('TIPO','OTROS')).strip(),
+            'subtipo': str(r.get('SUBTIPO','')).strip(),
+            'estado':  str(r.get('ESTADO','')).strip(),
+            'fecha':   r['fecha_p'].strftime('%Y-%m-%d') if pd.notna(r['fecha_p']) else '',
+            'mes':     r['fecha_p'].strftime('%Y-%m') if pd.notna(r['fecha_p']) else '',
+            'monto':   round(r['monto'], 2),
+        })
+    return out
+
+def generar_html(records, ruta_salida):
+    data_json = json.dumps(records, ensure_ascii=False)
+    
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tablero de Incidencias — Municipalidad de Río Cuarto</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Arial,sans-serif;background:#f4f6f9;color:#222;font-size:14px}}
+header{{background:#1a3a5c;color:#fff;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}}
+header h1{{font-size:17px;font-weight:600}}
+header p{{font-size:12px;opacity:.8}}
+.upload-area{{background:#e8f0fe;border:2px dashed #1a73e8;border-radius:8px;padding:14px 20px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:.2s}}
+.upload-area:hover{{background:#d2e3fc}}
+.upload-area label{{font-size:13px;color:#1a3a5c;font-weight:600;cursor:pointer}}
+.upload-area input{{display:none}}
+.filters{{background:#fff;padding:12px 24px;border-bottom:1px solid #ddd;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}}
+.filter-group{{display:flex;flex-direction:column;gap:4px}}
+.filter-group label{{font-size:11px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.04em}}
+.filter-group select,.filter-group input[type=text]{{font-size:12px;padding:5px 10px;border:1px solid #ccc;border-radius:6px;min-width:140px;background:#fafafa}}
+.filter-group input[type=text]{{min-width:180px}}
+.btn-reset{{padding:6px 14px;background:#fff;border:1px solid #ccc;border-radius:6px;font-size:12px;cursor:pointer;margin-top:auto}}
+.btn-reset:hover{{background:#f0f0f0}}
+.main{{padding:16px 24px;max-width:1400px;margin:0 auto}}
+.kpi-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}}
+.kpi{{background:#fff;border-radius:8px;padding:14px 16px;border-left:4px solid #1a73e8}}
+.kpi.green{{border-color:#2e7d32}}
+.kpi.amber{{border-color:#e65100}}
+.kpi.red{{border-color:#c62828}}
+.kpi-label{{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}}
+.kpi-val{{font-size:24px;font-weight:700;color:#1a3a5c;line-height:1}}
+.kpi-sub{{font-size:11px;color:#888;margin-top:4px}}
+.kpi.green .kpi-val{{color:#2e7d32}}
+.kpi.amber .kpi-val{{color:#e65100}}
+.kpi.red .kpi-val{{color:#c62828}}
+.charts-grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}}
+.chart-card{{background:#fff;border-radius:8px;padding:16px;border:1px solid #e0e0e0}}
+.chart-card.full{{grid-column:1/-1}}
+.chart-title{{font-size:13px;font-weight:600;color:#333;margin-bottom:10px}}
+.legend{{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:11px;color:#555}}
+.legend span{{display:flex;align-items:center;gap:4px}}
+.leg-sq{{width:9px;height:9px;border-radius:2px;display:inline-block;flex-shrink:0}}
+.table-card{{background:#fff;border-radius:8px;padding:16px;border:1px solid #e0e0e0;overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:12px}}
+th{{background:#f5f5f5;padding:8px 10px;text-align:left;border-bottom:2px solid #e0e0e0;color:#444;font-weight:600;white-space:nowrap}}
+td{{padding:7px 10px;border-bottom:1px solid #f0f0f0;vertical-align:middle}}
+tr:hover td{{background:#fafafa}}
+.badge{{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600}}
+.badge.cerrada{{background:#e8f5e9;color:#2e7d32}}
+.badge.ejecucion{{background:#fff3e0;color:#e65100}}
+.progress-wrap{{background:#eee;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle}}
+.progress-fill{{height:6px;border-radius:4px}}
+.search-highlight{{background:#fff176}}
+@media(max-width:700px){{
+  .charts-grid{{grid-template-columns:1fr}}
+  .chart-card.full{{grid-column:1}}
+}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Tablero de Incidencias Escolares</h1>
+    <p>Municipalidad de Río Cuarto &mdash; Rendiciones de mantenimiento</p>
+  </div>
+  <div class="upload-area">
+    <svg width="22" height="22" fill="none" stroke="#1a3a5c" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+    <label>Actualizar datos (xlsx)<input type="file" id="fileInput" accept=".xlsx,.xls"></label>
+  </div>
+</header>
+
+<div class="filters">
+  <div class="filter-group">
+    <label>Periodo</label>
+    <select id="fPeriodo"><option value="all">Todos</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Establecimiento</label>
+    <input type="text" id="fEscuela" placeholder="Buscar establecimiento...">
+  </div>
+  <div class="filter-group">
+    <label>Nivel</label>
+    <select id="fNivel"><option value="all">Todos</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select id="fTipo"><option value="all">Todos</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select id="fEstado"><option value="all">Todos</option><option value="CERRADA">Cerrada</option><option value="EJECUCIÓN">En ejecución</option></select>
+  </div>
+  <button class="btn-reset" onclick="resetFiltros()">&#x21BA; Limpiar</button>
+</div>
+
+<div class="main">
+  <div class="kpi-row" id="kpiRow"></div>
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">Incidencias por tipo</div>
+      <div class="legend" id="legTipo"></div>
+      <div style="position:relative;height:220px"><canvas id="cTipo"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Grado de conformidad</div>
+      <div class="legend" id="legEstado"></div>
+      <div style="position:relative;height:220px"><canvas id="cEstado"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Monto invertido por tipo</div>
+      <div style="position:relative;height:220px"><canvas id="cMonto"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Incidencias por nivel educativo</div>
+      <div class="legend" id="legNivel"></div>
+      <div style="position:relative;height:220px"><canvas id="cNivel"></canvas></div>
+    </div>
+    <div class="chart-card full">
+      <div class="chart-title">Top 15 establecimientos — incidencias y monto</div>
+      <div style="position:relative;height:340px"><canvas id="cEst"></canvas></div>
+    </div>
+  </div>
+  <div class="table-card">
+    <div class="chart-title" style="margin-bottom:10px">Detalle por establecimiento</div>
+    <table id="tEst">
+      <thead><tr>
+        <th>Establecimiento</th><th>Nivel</th><th>Incidencias</th>
+        <th>Monto total</th><th>Cerradas</th><th>Conformidad</th><th>Estado</th>
+      </tr></thead>
+      <tbody id="tBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const TIPO_COLORS = {{"ELECTRICIDAD":"#1565c0","HERRERIA":"#6a1b9a","PLOMERIA":"#00695c","PINTURA":"#bf360c","DESINFECCIÓN":"#33691e","ALBAÑILERIA":"#e65100","FILTRACIONES":"#880e4f","VARIOS":"#546e7a","PODA/CORTE DE PASTO":"#558b2f","MOBILIARIO":"#00796b","BOMBA":"#ad1457","GAS":"#f57f17","LIMPIEZA DE TANQUE/CISTERNA":"#4527a0","REPARACION/MANTENIMEINTO DE ARTEFACTOS":"#00838f","DESAGOTE":"#c62828","MATAFUEGOS":"#d84315"}};
+const NIVEL_COLORS = {{"INICIAL":"#1565c0","PRIMARIO":"#2e7d32","SECUNDARIO":"#e65100","-":"#546e7a","PRIMARIO, INICIAL":"#6a1b9a"}};
+const ESTADO_COLORS = {{"CERRADA":"#2e7d32","EJECUCIÓN":"#e65100"}};
+
+let RAW = {data_json};
+let charts = {{}};
+
+function fmt(n){{return new Intl.NumberFormat('es-AR',{{style:'currency',currency:'ARS',maximumFractionDigits:0}}).format(n);}}
+
+function poblarFiltros(data){{
+  const meses = [...new Set(data.map(r=>r.mes).filter(Boolean))].sort();
+  const sel = document.getElementById('fPeriodo');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="all">Todos</option>';
+  meses.forEach(m=>{{const opt=document.createElement('option');opt.value=m;opt.text=m;sel.appendChild(opt);}});
+  if(prev) sel.value = prev;
+
+  const niveles = [...new Set(data.map(r=>r.nivel).filter(Boolean))].sort();
+  const sn = document.getElementById('fNivel');
+  const pn = sn.value;
+  sn.innerHTML = '<option value="all">Todos</option>';
+  niveles.forEach(n=>{{const o=document.createElement('option');o.value=n;o.text=n;sn.appendChild(o);}});
+  if(pn) sn.value=pn;
+
+  const tipos = [...new Set(data.map(r=>r.tipo).filter(Boolean))].sort();
+  const st = document.getElementById('fTipo');
+  const pt = st.value;
+  st.innerHTML = '<option value="all">Todos</option>';
+  tipos.forEach(t=>{{const o=document.createElement('option');o.value=t;o.text=t;st.appendChild(o);}});
+  if(pt) st.value=pt;
+}}
+
+function resetFiltros(){{
+  document.getElementById('fPeriodo').value='all';
+  document.getElementById('fNivel').value='all';
+  document.getElementById('fTipo').value='all';
+  document.getElementById('fEstado').value='all';
+  document.getElementById('fEscuela').value='';
+  update();
+}}
+
+function getFiltered(){{
+  const periodo = document.getElementById('fPeriodo').value;
+  const nivel   = document.getElementById('fNivel').value;
+  const tipo    = document.getElementById('fTipo').value;
+  const estado  = document.getElementById('fEstado').value;
+  const escuela = document.getElementById('fEscuela').value.toLowerCase().trim();
+  return RAW.filter(r=>{{
+    if(periodo!=='all' && r.mes!==periodo) return false;
+    if(nivel!=='all' && r.nivel!==nivel) return false;
+    if(tipo!=='all' && r.tipo!==tipo) return false;
+    if(estado!=='all' && r.estado!==estado) return false;
+    if(escuela && !r.nombre.toLowerCase().includes(escuela)) return false;
+    return true;
+  }});
+}}
+
+function destroyAll(){{Object.values(charts).forEach(c=>c.destroy());charts={{}};}}
+
+function update(){{
+  destroyAll();
+  const data = getFiltered();
+  const total = data.length;
+  const montoTotal = data.reduce((a,r)=>a+r.monto,0);
+  const cerradas = data.filter(r=>r.estado==='CERRADA').length;
+  const conf = total>0 ? Math.round(cerradas/total*100) : 0;
+  const establecimientos = new Set(data.map(r=>r.nombre)).size;
+  const promedio = total>0 ? montoTotal/total : 0;
+
+  const confClass = conf>=90?'green':conf>=70?'amber':'red';
+  document.getElementById('kpiRow').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Total incidencias</div><div class="kpi-val">${{total}}</div><div class="kpi-sub">en el periodo</div></div>
+    <div class="kpi"><div class="kpi-label">Monto total</div><div class="kpi-val" style="font-size:18px">${{fmt(Math.round(montoTotal))}}</div><div class="kpi-sub">invertido</div></div>
+    <div class="kpi ${{confClass}}"><div class="kpi-label">Conformidad</div><div class="kpi-val">${{conf}}%</div><div class="kpi-sub">${{cerradas}} cerradas / ${{total-cerradas}} en ejec.</div></div>
+    <div class="kpi"><div class="kpi-label">Establecimientos</div><div class="kpi-val">${{establecimientos}}</div><div class="kpi-sub">con incidencias</div></div>
+    <div class="kpi"><div class="kpi-label">Monto promedio</div><div class="kpi-val" style="font-size:18px">${{fmt(Math.round(promedio))}}</div><div class="kpi-sub">por incidencia</div></div>
+  `;
+
+  // Tipo
+  const byTipo={{}};
+  data.forEach(r=>{{byTipo[r.tipo]=(byTipo[r.tipo]||0)+1;}});
+  const sortedTipo=Object.entries(byTipo).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('legTipo').innerHTML=sortedTipo.map(([t,v])=>`<span><span class="leg-sq" style="background:${{TIPO_COLORS[t]||'#888'}}"></span>${{t}} (${{v}})</span>`).join('');
+  charts.tipo=new Chart(document.getElementById('cTipo'),{{type:'bar',data:{{labels:sortedTipo.map(([t])=>t),datasets:[{{data:sortedTipo.map(([,v])=>v),backgroundColor:sortedTipo.map(([t])=>TIPO_COLORS[t]||'#888'),borderRadius:3}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{x:{{ticks:{{font:{{size:10}},maxRotation:45,autoSkip:false}}}},y:{{beginAtZero:true,ticks:{{stepSize:1}}}}}}}}}});
+
+  // Estado
+  document.getElementById('legEstado').innerHTML=Object.entries(ESTADO_COLORS).map(([k,c])=>`<span><span class="leg-sq" style="background:${{c}}"></span>${{k}}: ${{data.filter(r=>r.estado===k).length}} (${{total>0?Math.round(data.filter(r=>r.estado===k).length/total*100):0}}%)</span>`).join('');
+  charts.estado=new Chart(document.getElementById('cEstado'),{{type:'doughnut',data:{{labels:['CERRADA','EJECUCIÓN'],datasets:[{{data:[cerradas,total-cerradas],backgroundColor:['#2e7d32','#e65100'],borderWidth:0,hoverOffset:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},cutout:'60%'}}}});
+
+  // Monto por tipo
+  const byMonto={{}};
+  data.forEach(r=>{{byMonto[r.tipo]=(byMonto[r.tipo]||0)+r.monto;}});
+  const sortedMonto=Object.entries(byMonto).sort((a,b)=>b[1]-a[1]);
+  charts.monto=new Chart(document.getElementById('cMonto'),{{type:'bar',data:{{labels:sortedMonto.map(([t])=>t),datasets:[{{data:sortedMonto.map(([,v])=>Math.round(v/1000000*10)/10),backgroundColor:sortedMonto.map(([t])=>TIPO_COLORS[t]||'#888'),borderRadius:3}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>`$${{ctx.parsed.y}}M`}}}}}},scales:{{x:{{ticks:{{font:{{size:10}},maxRotation:45,autoSkip:false}}}},y:{{beginAtZero:true,ticks:{{callback:v=>`$${{v}}M`}}}}}}}}}});
+
+  // Nivel
+  const byNivel={{}};
+  data.forEach(r=>{{byNivel[r.nivel]=(byNivel[r.nivel]||0)+1;}});
+  document.getElementById('legNivel').innerHTML=Object.entries(byNivel).map(([k,v])=>`<span><span class="leg-sq" style="background:${{NIVEL_COLORS[k]||'#888'}}"></span>${{k}} (${{v}})</span>`).join('');
+  charts.nivel=new Chart(document.getElementById('cNivel'),{{type:'pie',data:{{labels:Object.keys(byNivel),datasets:[{{data:Object.values(byNivel),backgroundColor:Object.keys(byNivel).map(k=>NIVEL_COLORS[k]||'#888'),borderWidth:0}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}});
+
+  // Top 15 establecimientos
+  const byEst={{}};
+  data.forEach(r=>{{if(!byEst[r.nombre])byEst[r.nombre]={{count:0,monto:0,cerradas:0,nivel:r.nivel}};byEst[r.nombre].count++;byEst[r.nombre].monto+=r.monto;if(r.estado==='CERRADA')byEst[r.nombre].cerradas++;}});
+  const sorted15=Object.entries(byEst).sort((a,b)=>b[1].count-a[1].count).slice(0,15);
+  const labels15=sorted15.map(([n])=>n.length>25?n.substring(0,25)+'…':n);
+  charts.est=new Chart(document.getElementById('cEst'),{{type:'bar',data:{{labels:labels15,datasets:[{{label:'Incidencias',data:sorted15.map(([,v])=>v.count),backgroundColor:'#1565c0',borderRadius:3,yAxisID:'y'}},{{label:'Monto (M$)',data:sorted15.map(([,v])=>Math.round(v.monto/1000000*10)/10),backgroundColor:'#bf360c',borderRadius:3,yAxisID:'y1'}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:true,position:'top'}}}},scales:{{x:{{ticks:{{font:{{size:10}},maxRotation:45,autoSkip:false}}}},y:{{type:'linear',position:'left',beginAtZero:true,title:{{display:true,text:'Incidencias',font:{{size:11}}}}}},y1:{{type:'linear',position:'right',beginAtZero:true,grid:{{drawOnChartArea:false}},title:{{display:true,text:'Monto M$',font:{{size:11}}}}}}}}}}}});
+
+  // Tabla
+  document.getElementById('tBody').innerHTML=sorted15.map(([nm,v])=>{{
+    const c=Math.round(v.cerradas/v.count*100);
+    const color=c>=90?'#2e7d32':c>=70?'#e65100':'#c62828';
+    return `<tr>
+      <td style="max-width:200px;white-space:normal">${{nm}}</td>
+      <td>${{v.nivel}}</td>
+      <td style="text-align:center;font-weight:700">${{v.count}}</td>
+      <td style="text-align:right">${{fmt(Math.round(v.monto))}}</td>
+      <td style="text-align:center">${{v.cerradas}}/${{v.count}}</td>
+      <td><div style="display:flex;align-items:center;gap:6px"><div class="progress-wrap"><div class="progress-fill" style="width:${{c}}%;background:${{color}}"></div></div><span style="font-size:11px;min-width:30px">${{c}}%</span></div></td>
+      <td><span class="badge ${{v.count===v.cerradas?'cerrada':'ejecucion'}}">${{v.count===v.cerradas?'✓ OK':'En curso'}}</span></td>
+    </tr>`;
+  }}).join('');
+}}
+
+// Carga de archivo xlsx
+document.getElementById('fileInput').addEventListener('change', async function(e){{
+  const file = e.target.files[0];
+  if(!file) return;
+  const {{read, utils}} = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+  const buf = await file.arrayBuffer();
+  const wb = read(buf);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = utils.sheet_to_json(ws, {{header:1}});
+  
+  const headers = rows[0].map(h=>String(h).trim());
+  const idxNro = headers.findIndex(h=>h.includes('NRO'));
+  const idxNom = headers.findIndex(h=>h.includes('NOMBRE'));
+  const idxNiv = headers.findIndex(h=>h.includes('NIVEL'));
+  const idxTip = headers.findIndex(h=>h.includes('TIPO') && !h.includes('SUB'));
+  const idxSub = headers.findIndex(h=>h.includes('SUBTIPO'));
+  const idxEst = headers.findIndex(h=>h.includes('ESTADO'));
+  const idxFec = headers.findIndex(h=>h.includes('FECHA INCIDENCIA'));
+  const idxMon = headers.findIndex(h=>h.includes('MONTO RENDIDO'));
+  
+  const nuevos = [];
+  rows.slice(1).forEach(row=>{{
+    if(!row[idxNro]) return;
+    const montoStr = String(row[idxMon]||'0').replace(/[\$\.]/g,'').replace(',','.');
+    const monto = parseFloat(montoStr)||0;
+    let fecha='', mes='';
+    if(row[idxFec]){{
+      const d = new Date(Math.round((row[idxFec]-25569)*86400*1000));
+      if(!isNaN(d)){{fecha=d.toISOString().slice(0,10);mes=fecha.slice(0,7);}}
+    }}
+    nuevos.push({{
+      nro: String(row[idxNro]),
+      nombre: String(row[idxNom]||'').trim(),
+      nivel: String(row[idxNiv]||'-').trim(),
+      tipo: String(row[idxTip]||'OTROS').trim(),
+      subtipo: String(row[idxSub]||'').trim(),
+      estado: String(row[idxEst]||'').trim(),
+      fecha, mes, monto
+    }});
+  }});
+  
+  if(nuevos.length===0){{alert('No se encontraron incidencias en el archivo.');return;}}
+  RAW = nuevos;
+  poblarFiltros(RAW);
+  update();
+  alert(`✓ Datos actualizados: ${{nuevos.length}} incidencias cargadas.`);
+}});
+
+['fPeriodo','fNivel','fTipo','fEstado'].forEach(id=>document.getElementById(id).addEventListener('change',update));
+document.getElementById('fEscuela').addEventListener('input', update);
+
+poblarFiltros(RAW);
+update();
+</script>
+</body>
+</html>"""
+    
+    with open(ruta_salida, 'w', encoding='utf-8') as f:
+        f.write(html)
+    print(f"✓ Tablero generado: {ruta_salida} ({len(records)} incidencias)")
+
+def procesar_directorio(ruta_dir):
+    all_records = {}
+    if not os.path.exists(ruta_dir) or not os.path.isdir(ruta_dir):
+        return []
+    
+    # Ordenar alfabéticamente para asegurar un procesamiento predecible
+    archivos = sorted([f for f in os.listdir(ruta_dir) if f.endswith(('.xlsx', '.xls'))])
+    
+    for archivo in archivos:
+        ruta_archivo = os.path.join(ruta_dir, archivo)
+        print(f"Consolidando: {ruta_archivo}")
+        try:
+            records = procesar_xlsx(ruta_archivo)
+            for r in records:
+                # El nro de incidencia es único. Mapeamos por clave para insertar/actualizar
+                all_records[r['nro']] = r
+        except Exception as e:
+            print(f"Error procesando {archivo}: {e}")
+            
+    return list(all_records.values())
+
+if __name__ == '__main__':
+    entrada = sys.argv[1] if len(sys.argv) > 1 else None
+    salida  = sys.argv[2] if len(sys.argv) > 2 else 'tablero_incidencias.html'
+    
+    if entrada and os.path.exists(entrada):
+        if os.path.isdir(entrada):
+            print(f"Procesando directorio: {entrada}")
+            records = procesar_directorio(entrada)
+        else:
+            print(f"Procesando archivo único: {entrada}")
+            records = procesar_xlsx(entrada)
+        generar_html(records, salida)
+    else:
+        print("Uso: python generar_tablero.py <archivo.xlsx o directorio_uploads> [tablero_salida.html]")
+        print("Ejemplo: python generar_tablero.py uploads/ tablero_consolidado.html")
+        sys.exit(1)
